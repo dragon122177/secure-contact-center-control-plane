@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relayops-worker
+  namespace: relayops
+  labels: &labels
+    app.kubernetes.io/name: relayops-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: relayops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: relayops-worker
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      serviceAccountName: relayops-worker
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: ghcr.io/dragon122177/relayops-api:latest
+          command: ['node', 'apps/api/dist/worker.js']
+          envFrom:
+            - configMapRef: { name: relayops-config }
+            - secretRef: { name: relayops-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 700m, memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ['ALL'] }
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: relayops-worker
+  namespace: relayops
+automountServiceAccountToken: false

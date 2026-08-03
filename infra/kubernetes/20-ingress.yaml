@@ -1,0 +1,33 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: relayops
+  namespace: relayops
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '3600'
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [relayops.example.com]
+      secretName: relayops-tls
+  rules:
+    - host: relayops.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: api, port: { number: 8080 } }
+          - path: /health
+            pathType: Prefix
+            backend:
+              service: { name: api, port: { number: 8080 } }
+          - path: /live
+            pathType: Prefix
+            backend:
+              service: { name: api, port: { number: 8080 } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: relayops-web, port: { number: 80 } }

@@ -1,0 +1,608 @@
+openapi: 3.1.0
+info:
+  title: RelayOps Control Plane API
+  version: 1.0.0
+  summary: Provider-neutral contact-center operations API
+  description: |
+    RelayOps manages synthetic contact-center configuration, routing decisions, automation,
+    network-access metadata, and audit evidence. Audio transport, provider VPN operation,
+    telephone numbers, and billing are outside this API's scope.
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: /
+    description: Same-origin API endpoint
+tags:
+  - name: Authentication
+    description: Operator login and short-lived live-connection tickets.
+  - name: Operations
+    description: Live workspace, agent, and call state.
+  - name: Routing
+    description: Queue configuration, skills, capacity, and workload.
+  - name: Automation
+    description: Event-triggered rules and worker execution history.
+  - name: Security
+    description: Provider network-access policy metadata and decisions.
+  - name: Audit
+    description: Append-only evidence for sensitive control-plane activity.
+  - name: Provider integration
+    description: Signed, idempotent lifecycle events from a provider-hosted VoIP platform.
+paths:
+  /health/live:
+    get:
+      operationId: liveness
+      summary: Process liveness
+      security: []
+      responses:
+        '200':
+          description: Process is alive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /health/ready:
+    get:
+      operationId: readiness
+      summary: Dependency readiness
+      security: []
+      responses:
+        '200': { description: Ready to serve traffic }
+        '503': { description: A required dependency is unavailable }
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      operationId: login
+      summary: Exchange local credentials for an access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: admin@relayops.local }
+                password: { type: string, format: password, minLength: 8, example: RelayOps!2026 }
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/live-token:
+    post:
+      tags: [Authentication]
+      operationId: issueLiveToken
+      summary: Issue a 60-second, purpose-bound WebSocket ticket
+      responses:
+        '200':
+          description: Short-lived connection ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expiresInSeconds]
+                properties:
+                  token: { type: string }
+                  expiresInSeconds: { type: integer, const: 60 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/dashboard:
+    get:
+      tags: [Operations]
+      operationId: getDashboard
+      summary: Read a realtime workspace summary
+      responses:
+        '200':
+          description: Operational summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/agents:
+    get:
+      tags: [Operations]
+      operationId: listAgents
+      summary: List enabled agents, teams, skills, and presence
+      responses:
+        '200':
+          description: Agent collection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Agent' }
+  /api/v1/agents/{id}/presence:
+    patch:
+      tags: [Operations]
+      operationId: updateAgentPresence
+      summary: Change a manually controlled agent presence
+      description: ADMIN or SUPERVISOR only. ON_CALL and RESERVED are provider-event controlled.
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [presence]
+              properties:
+                presence:
+                  $ref: '#/components/schemas/AgentPresence'
+      responses:
+        '200':
+          description: Updated presence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agent' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/queues:
+    get:
+      tags: [Routing]
+      operationId: listQueues
+      summary: List queue configuration and current load
+      responses:
+        '200':
+          description: Queue collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Queue' }
+  /api/v1/calls:
+    get:
+      tags: [Operations]
+      operationId: listCalls
+      summary: List call sessions
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CallStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Paginated call collection
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: '#/components/schemas/Call' }
+  /api/v1/calls/{id}/events:
+    get:
+      tags: [Operations]
+      operationId: getCallEvents
+      summary: Read the ordered lifecycle of one call
+      parameters:
+        - $ref: '#/components/parameters/ResourceId'
+      responses:
+        '200':
+          description: Ordered call events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CallEvent' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/automations/rules:
+    get:
+      tags: [Automation]
+      operationId: listAutomationRules
+      summary: List automation rules
+      responses:
+        '200':
+          description: Rule collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AutomationRule' }
+    post:
+      tags: [Automation]
+      operationId: createAutomationRule
+      summary: Create an automation rule
+      description: ADMIN or SUPERVISOR only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AutomationRuleInput' }
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationRule' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/automations/runs:
+    get:
+      tags: [Automation]
+      operationId: listAutomationRuns
+      summary: List recent worker executions
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        '200': { description: Automation run collection }
+  /api/v1/security/network-policies:
+    get:
+      tags: [Security]
+      operationId: listNetworkPolicies
+      summary: List provider-access policy metadata
+      responses:
+        '200':
+          description: Policy collection
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/NetworkPolicy' }
+  /api/v1/security/network-sessions:
+    get:
+      tags: [Security]
+      operationId: listNetworkSessions
+      summary: List recent access decisions
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        '200': { description: Network-access decision collection }
+  /api/v1/security/network-sessions/validate:
+    post:
+      tags: [Security]
+      operationId: evaluateNetworkAccess
+      summary: Evaluate synthetic source and device posture against policy metadata
+      description: This records a control-plane decision; it does not establish a VPN tunnel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId, sourceIp, managedDevice]
+              properties:
+                agentId: { type: string, format: uuid }
+                sourceIp: { type: string, format: ipv4, example: 10.44.18.22 }
+                deviceId: { type: string, example: demo-managed-device }
+                managedDevice: { type: boolean, example: true }
+      responses:
+        '201':
+          description: Access evaluation was recorded with either an ALLOW or DENY decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NetworkDecision' }
+  /api/v1/audit/events:
+    get:
+      tags: [Audit]
+      operationId: listAuditEvents
+      summary: Read append-only audit evidence
+      description: ADMIN, SUPERVISOR, or AUDITOR only.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: action
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit event collection
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/provider/webhooks/{workspaceSlug}:
+    post:
+      tags: [Provider integration]
+      operationId: ingestProviderWebhook
+      summary: Ingest one signed provider event
+      description: |
+        Public integration endpoint protected by an HMAC-SHA256 signature, timestamp tolerance,
+        rate limiting, and an idempotent inbox. Compute the signature over
+        `{timestamp}.{canonicalJson(body)}`, where object keys are recursively sorted.
+      security: []
+      parameters:
+        - name: workspaceSlug
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9-]+$', example: acme-support }
+        - name: x-relayops-timestamp
+          in: header
+          required: true
+          schema: { type: string, example: '1785768000' }
+        - name: x-relayops-signature
+          in: header
+          required: true
+          schema: { type: string, pattern: '^[a-f0-9]{64}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderWebhook' }
+      responses:
+        '202':
+          description: New event accepted and processed transactionally
+        '200':
+          description: Duplicate event acknowledged without reprocessing
+        '401': { description: Signature is invalid or outside the timestamp tolerance }
+        '409': { description: Event is out of order for the current call state }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Unauthorized:
+      description: Authentication is missing, invalid, or expired
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated role cannot perform the operation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Workspace resource was not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: Requested state conflicts with active work
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  schemas:
+    Health:
+      type: object
+      required: [status, service]
+      properties:
+        status: { type: string, const: ok }
+        service: { type: string, const: relayops-api }
+    ErrorEnvelope:
+      type: object
+      required: [error, correlationId]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, example: FORBIDDEN }
+            message: { type: string }
+            details: {}
+        correlationId: { type: string, format: uuid }
+    LoginResponse:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: string, example: 8h }
+        user:
+          type: object
+          required: [id, workspaceId, email, displayName, role]
+          properties:
+            id: { type: string, format: uuid }
+            workspaceId: { type: string, format: uuid }
+            email: { type: string, format: email }
+            displayName: { type: string }
+            role: { type: string, enum: [ADMIN, SUPERVISOR, AGENT, AUDITOR] }
+    AgentPresence:
+      type: string
+      enum: [OFFLINE, AVAILABLE, RESERVED, ON_CALL, WRAP_UP, BREAK]
+    CallStatus:
+      type: string
+      enum: [RECEIVED, QUEUED, ROUTING, RINGING, ACTIVE, WRAP_UP, COMPLETED, ABANDONED, FAILED]
+    Agent:
+      type: object
+      required: [id, externalId, displayName, presence, skills]
+      properties:
+        id: { type: string, format: uuid }
+        externalId: { type: string, example: agt-aiko }
+        displayName: { type: string, example: Aiko Tanaka }
+        extension: { type: string, example: '2101' }
+        teamName: { type: string, example: Customer Care }
+        presence: { $ref: '#/components/schemas/AgentPresence' }
+        skills:
+          type: array
+          items: { type: string }
+        activeCallCount: { type: integer, minimum: 0 }
+        maxConcurrentCalls: { type: integer, minimum: 1 }
+        lastAssignedAt: { type: [string, 'null'], format: date-time }
+    Queue:
+      type: object
+      required: [id, key, displayName, memberCount, availableAgents, requiredSkills]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, example: security-escalations }
+        displayName: { type: string, example: Security Escalations }
+        description: { type: string }
+        serviceLevelSeconds: { type: integer }
+        maxWaitSeconds: { type: integer }
+        enabled: { type: boolean }
+        memberCount: { type: integer }
+        availableAgents: { type: integer }
+        requiredSkills:
+          type: array
+          items: { type: string }
+        waitingCalls: { type: integer }
+        activeCalls: { type: integer }
+        averageWaitSeconds: { type: integer }
+    Call:
+      type: object
+      required: [id, providerCallId, direction, status, callerNumber, destinationNumber, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        providerCallId: { type: string }
+        direction: { type: string, enum: [INBOUND, OUTBOUND] }
+        status: { $ref: '#/components/schemas/CallStatus' }
+        callerNumber: { type: string }
+        destinationNumber: { type: string }
+        queueName: { type: [string, 'null'] }
+        agentName: { type: [string, 'null'] }
+        startedAt: { type: string, format: date-time }
+        answeredAt: { type: [string, 'null'], format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+        endedReason: { type: [string, 'null'] }
+        disposition: { type: [string, 'null'] }
+        tags:
+          type: array
+          items: { type: string }
+    CallEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        eventType: { type: string }
+        previousStatus: { oneOf: [{ $ref: '#/components/schemas/CallStatus' }, { type: 'null' }] }
+        currentStatus: { $ref: '#/components/schemas/CallStatus' }
+        payload: { type: object, additionalProperties: true }
+        occurredAt: { type: string, format: date-time }
+        ingestedAt: { type: string, format: date-time }
+    Dashboard:
+      type: object
+      required: [agents, calls, queues, automations, recentActivity, generatedAt]
+      properties:
+        agents: { type: object, additionalProperties: { type: integer } }
+        calls: { type: object, additionalProperties: { type: integer } }
+        queues:
+          type: array
+          items: { type: object, additionalProperties: true }
+        automations: { type: object, additionalProperties: { type: integer } }
+        recentActivity:
+          type: array
+          items: { type: object, additionalProperties: true }
+        generatedAt: { type: string, format: date-time }
+    AutomationCondition:
+      type: object
+      required: [field, operator, value]
+      properties:
+        field: { type: string, enum: [endedReason, queueKey, direction, status] }
+        operator: { type: string, enum: [equals, not_equals, contains] }
+        value: { type: string, maxLength: 200 }
+    AutomationAction:
+      type: object
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [ADD_TAG, SET_DISPOSITION, NOTIFY_SUPERVISOR] }
+        value: { type: string, maxLength: 500 }
+    AutomationRuleInput:
+      type: object
+      required: [name, triggerEvent, actions]
+      properties:
+        name: { type: string, minLength: 3, maxLength: 120 }
+        description: { type: string, maxLength: 500, default: '' }
+        triggerEvent: { type: string, enum: [CALL_ENDED, CALL_ABANDONED, CALL_FAILED] }
+        conditions:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/AutomationCondition' }
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: '#/components/schemas/AutomationAction' }
+    AutomationRule:
+      allOf:
+        - $ref: '#/components/schemas/AutomationRuleInput'
+        - type: object
+          required: [id, enabled, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            enabled: { type: boolean }
+            createdAt: { type: string, format: date-time }
+    NetworkPolicy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        providerName: { type: string }
+        accessType: { type: string, enum: [VPN, PROXY, DIRECT] }
+        allowedCidrs:
+          type: array
+          items: { type: string }
+        requireManagedDevice: { type: boolean }
+        enabled: { type: boolean }
+        notes: { type: string }
+    NetworkDecision:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        decision: { type: string, enum: [ALLOW, DENY] }
+        reason: { type: string }
+        connectedAt: { type: string, format: date-time }
+        policy: { oneOf: [{ $ref: '#/components/schemas/NetworkPolicy' }, { type: 'null' }] }
+    ProviderWebhook:
+      type: object
+      required: [eventId, eventType, occurredAt, call]
+      properties:
+        eventId: { type: string, example: evt-demo-001 }
+        eventType:
+          type: string
+          enum:
+            [
+              CALL_RECEIVED,
+              CALL_QUEUED,
+              AGENT_RINGING,
+              AGENT_ANSWERED,
+              CALL_ENDED,
+              CALL_ABANDONED,
+              CALL_FAILED,
+            ]
+        occurredAt: { type: string, format: date-time }
+        call:
+          type: object
+          required: [providerCallId, direction, from, to]
+          properties:
+            providerCallId: { type: string, example: provider-call-001 }
+            direction: { type: string, enum: [INBOUND, OUTBOUND] }
+            from: { type: string, example: +81-50-0000-0001 }
+            to: { type: string, example: +81-50-5555-0100 }
+            queueKey: { type: string, example: customer-care }
+            agentExternalId: { type: string, example: agt-aiko }
+            endedReason: { type: string, example: NORMAL_CLEARING }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+    Page:
+      type: object
+      required: [total, limit, offset]
+      properties:
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1 }
+        offset: { type: integer, minimum: 0 }
+security:
+  - bearerAuth: []

@@ -1,0 +1,18 @@
+{
+  "eventId": "evt-demo-call-ended-001",
+  "eventType": "CALL_ENDED",
+  "occurredAt": "2026-08-03T12:08:00.000Z",
+  "call": {
+    "providerCallId": "provider-demo-call-1001",
+    "direction": "INBOUND",
+    "from": "+81-50-0000-1001",
+    "to": "+81-50-5555-0100",
+    "queueKey": "customer-care",
+    "agentExternalId": "agt-aiko",
+    "endedReason": "NORMAL_CLEARING"
+  },
+  "metadata": {
+    "provider": "FictionalTel",
+    "synthetic": "true"
+  }
+}

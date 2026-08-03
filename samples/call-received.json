@@ -1,0 +1,16 @@
+{
+  "eventId": "evt-demo-call-received-001",
+  "eventType": "CALL_RECEIVED",
+  "occurredAt": "2026-08-03T12:00:00.000Z",
+  "call": {
+    "providerCallId": "provider-demo-call-1001",
+    "direction": "INBOUND",
+    "from": "+81-50-0000-1001",
+    "to": "+81-50-5555-0100",
+    "queueKey": "customer-care"
+  },
+  "metadata": {
+    "provider": "FictionalTel",
+    "synthetic": "true"
+  }
+}
